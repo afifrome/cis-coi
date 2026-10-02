@@ -1,0 +1,113 @@
+{
+    "submissions": [
+        {
+            "Timestamp": "2026-10-02 15:53:50",
+            "Tender Ref": "T2027/001",
+            "Name": "asd",
+            "Employee No": "sad",
+            "Position": "dsa",
+            "Department": "asd",
+            "Status": "No Conflict of Interest",
+            "Conflict Details": "None",
+            "Tenderer Involved": "AN",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 15:55:12",
+            "Tender Ref": "T2027/001",
+            "Name": "asd",
+            "Employee No": "ads",
+            "Position": "asd",
+            "Department": "asd",
+            "Status": "No Conflict of Interest",
+            "Conflict Details": "None",
+            "Tenderer Involved": "AKMAL PUNYA",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 15:56:58",
+            "Tender Ref": "T2027/001",
+            "Name": "asd",
+            "Employee No": "sad",
+            "Position": "sad",
+            "Department": "sad",
+            "Status": "No Conflict of Interest",
+            "Conflict Details": "None",
+            "Tenderer Involved": "None",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 15:58:06",
+            "Tender Ref": "T2027/001",
+            "Name": "asd",
+            "Employee No": "sad",
+            "Position": "sad",
+            "Department": "sad",
+            "Status": "No Conflict of Interest",
+            "Conflict Details": "asd",
+            "Tenderer Involved": "asd",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 16:23:12",
+            "Tender Ref": "T2027/001",
+            "Name": "HAHAHA",
+            "Employee No": "HAHAHA",
+            "Position": "HAHAHA",
+            "Department": "HAHAHA",
+            "Status": "Conflict of Interest Exists",
+            "Conflict Details": "ADA",
+            "Tenderer Involved": "SANA",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 16:29:27",
+            "Tender Ref": "T2027/001",
+            "Name": "sad",
+            "Employee No": "ads",
+            "Position": "ads",
+            "Department": "dsa",
+            "Status": "Conflict of Interest Exists",
+            "Conflict Details": "dasdsa",
+            "Tenderer Involved": "sadasd",
+            "Agreed Terms": "Yes"
+        },
+        {
+            "Timestamp": "2026-10-02 16:30:47",
+            "Tender Ref": "T2027/001",
+            "Name": "ASASD",
+            "Employee No": "SADASD",
+            "Position": "ASDASDASD",
+            "Department": "DASDSA",
+            "Status": "Conflict of Interest Exists",
+            "Conflict Details": "DFA",
+            "Tenderer Involved": "DSFA",
+            "Agreed Terms": "Yes"
+        }
+    ],
+    "active_tenders": [
+        "T2027/001 - FIRST EVENT",
+        "T2027/002 - SECOND EVENT",
+        "T2027/003 - THIRD EVENT"
+    ],
+    "site_config": {
+        "company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.",
+        "location_subtitle": "Sepanggar Industrial Estate \u2022 Opening Tender Committee Declaration Form"
+    },
+    "users": [
+        {
+            "username": "admin",
+            "password": "admin123",
+            "role": "System Administrator",
+            "access": "Full CRUD on Tenders, Submissions & Config",
+            "status": "Active"
+        },
+        {
+            "username": "auditor",
+            "password": "audit123",
+            "role": "Internal Auditor / Compliance",
+            "access": "Read-Only Register & Printable Report",
+            "status": "Active"
+        }
+    ]
+}
