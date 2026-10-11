@@ -296,7 +296,7 @@ if nav_mode == "Admin Portal":
             if search_query:
                 filtered_subs = [s for s in filtered_subs if search_query.lower() in s.get("Name","").lower() or search_query in s.get("Employee No","") or search_query.lower() in s.get("Department","").lower()]
             if status_filter != "All":
-                filtered_subs = [s for s in filtered_subs if s.get("Status"] == status_filter]
+                filtered_subs = [s for s in filtered_subs if s.get("Status") == status_filter]
             
             if total_subs == 0:
                 st.info("No declarations submitted yet.")
