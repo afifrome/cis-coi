@@ -1,2 +1,0 @@
-[postgres]
-url = "postgresql://postgres:sabahcement84476@db.wswwovvogioefktgwazk.supabase.co:5432/postgres"
