@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 import base64
 import os
-import json
+import psycopg2
 
 # Page configuration
 st.set_page_config(
@@ -13,35 +13,137 @@ st.set_page_config(
     layout="centered"
 )
 
-DB_FILE = "cis_tender_database.json"
+# --- SUPABASE DATABASE CONNECTION ---
+@st.cache_resource
+def init_connection():
+    # Uses connection string from Streamlit secrets or direct URL fallback
+    db_url = st.secrets.get("postgres", {}).get("url", "postgresql://postgres:sabahcement84476@db.wswwovvogioefktgwazk.supabase.co:5432/postgres")
+    return psycopg2.connect(db_url)
 
+conn = init_connection()
+
+def init_db_tables():
+    with conn.cursor() as cur:
+        # 1. Submissions table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS submissions (
+                id SERIAL PRIMARY KEY,
+                timestamp TEXT,
+                tender_ref TEXT,
+                name TEXT,
+                employee_no TEXT,
+                position TEXT,
+                department TEXT,
+                status TEXT,
+                conflict_details TEXT,
+                tenderer_involved TEXT,
+                agreed_terms TEXT
+            );
+        """)
+        # 2. Active tenders table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS active_tenders (
+                id SERIAL PRIMARY KEY,
+                tender_text TEXT UNIQUE
+            );
+        """)
+        # 3. Site config table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS site_config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+        """)
+        # 4. Users table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username TEXT UNIQUE,
+                password TEXT,
+                role TEXT,
+                access TEXT,
+                status TEXT
+            );
+        """)
+        conn.commit()
+
+        # Seed initial data if tables are empty
+        cur.execute("SELECT COUNT(*) FROM active_tenders;")
+        if cur.fetchone()[0] == 0:
+            default_tenders = [
+                "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
+                "T2027/002 - Upgrading of Raw Material Handling Conveyor System",
+                "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"
+            ]
+            for t in default_tenders:
+                cur.execute("INSERT INTO active_tenders (tender_text) VALUES (%s) ON CONFLICT DO NOTHING;", (t,))
+
+        cur.execute("SELECT COUNT(*) FROM site_config;")
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO site_config (key, value) VALUES (%s, %s) ON CONFLICT DO NOTHING;", ("company_name", "CEMENT INDUSTRIES (SABAH) SDN. BHD."))
+            cur.execute("INSERT INTO site_config (key, value) VALUES (%s, %s) ON CONFLICT DO NOTHING;", ("location_subtitle", "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"))
+
+        cur.execute("SELECT COUNT(*) FROM users;")
+        if cur.fetchone()[0] == 0:
+            default_users = [
+                ("admin", "admin123", "System Administrator", "Full CRUD on Tenders, Submissions & Config", "Active"),
+                ("auditor", "audit123", "Internal Auditor / Compliance", "Read-Only Register & Printable Report", "Active")
+            ]
+            for u in default_users:
+                cur.execute("INSERT INTO users (username, password, role, access, status) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING;", u)
+        conn.commit()
+
+init_db_tables()
+
+# --- LOAD DATA FROM POSTGRESQL ---
 def load_data():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        except:
-            pass
-    return {
-        "submissions": [],
-        "active_tenders": [
-            "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
-            "T2027/002 - Upgrading of Raw Material Handling Conveyor System",
-            "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"
-        ],
-        "site_config": {
-            "company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.",
-            "location_subtitle": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"
-        },
-        "users": [
-            {"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full CRUD on Tenders, Submissions & Config", "status": "Active"},
-            {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
-        ]
-    }
+    with conn.cursor() as cur:
+        # Load Submissions
+        cur.execute("SELECT timestamp, tender_ref, name, employee_no, position, department, status, conflict_details, tenderer_involved, agreed_terms FROM submissions ORDER BY id;")
+        sub_rows = cur.fetchall()
+        submissions = []
+        for r in sub_rows:
+            submissions.append({
+                "Timestamp": r[0],
+                "Tender Ref": r[1],
+                "Name": r[2],
+                "Employee No": r[3],
+                "Position": r[4],
+                "Department": r[5],
+                "Status": r[6],
+                "Conflict Details": r[7],
+                "Tenderer Involved": r[8],
+                "Agreed Terms": r[9]
+            })
 
-def save_data(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        # Load Tenders
+        cur.execute("SELECT tender_text FROM active_tenders ORDER BY id;")
+        active_tenders = [row[0] for row in cur.fetchall()]
+
+        # Load Config
+        cur.execute("SELECT key, value FROM site_config;")
+        config_rows = cur.fetchall()
+        site_config = {row[0]: row[1] for row in config_rows}
+
+        # Load Users
+        cur.execute("SELECT username, password, role, access, status FROM users ORDER BY id;")
+        user_rows = cur.fetchall()
+        users = []
+        for r in user_rows:
+            users.append({
+                "username": r[0],
+                "password": r[1],
+                "role": r[2],
+                "access": r[3],
+                "status": r[4]
+            })
+
+    return {
+        "submissions": submissions,
+        "active_tenders": active_tenders,
+        "site_config": site_config,
+        "users": users
+    }
 
 db = load_data()
 
@@ -66,13 +168,52 @@ if "users" not in st.session_state:
 if "step" not in st.session_state:
     st.session_state.step = 1
 
+# --- DB COMMIT HELPERS (Syncs session state changes directly to Supabase) ---
+def commit_submissions():
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM submissions;")
+        for s in st.session_state.submissions:
+            cur.execute("""
+                INSERT INTO submissions (timestamp, tender_ref, name, employee_no, position, department, status, conflict_details, tenderer_involved, agreed_terms)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            """, (
+                s.get("Timestamp"), s.get("Tender Ref"), s.get("Name"), s.get("Employee No"),
+                s.get("Position"), s.get("Department"), s.get("Status"), s.get("Conflict Details"),
+                s.get("Tenderer Involved"), s.get("Agreed Terms")
+            ))
+        conn.commit()
+
+def commit_tenders():
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM active_tenders;")
+        for t in st.session_state.active_tenders:
+            cur.execute("INSERT INTO active_tenders (tender_text) VALUES (%s) ON CONFLICT DO NOTHING;", (t,))
+        conn.commit()
+
+def commit_config():
+    with conn.cursor() as cur:
+        for k, v in st.session_state.site_config.items():
+            cur.execute("""
+                INSERT INTO site_config (key, value) VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+            """, (k, v))
+        conn.commit()
+
+def commit_users():
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM users;")
+        for u in st.session_state.users:
+            cur.execute("""
+                INSERT INTO users (username, password, role, access, status)
+                VALUES (%s, %s, %s, %s, %s);
+            """, (u.get("username"), u.get("password"), u.get("role"), u.get("access"), u.get("status")))
+        conn.commit()
+
 def commit_db():
-    save_data({
-        "submissions": st.session_state.submissions,
-        "active_tenders": st.session_state.active_tenders,
-        "site_config": st.session_state.site_config,
-        "users": st.session_state.users
-    })
+    commit_submissions()
+    commit_tenders()
+    commit_config()
+    commit_users()
 
 def next_step():
     st.session_state.step += 1
@@ -98,7 +239,7 @@ with st.sidebar:
     
     if nav_mode == "Admin Portal":
         admin_pass = st.text_input("Enter Admin Password", type="password")
-        admin_users = [u["password"] for u in st.session_state.users if u.get("role") == "System Administrator" and u.get("status") == "Active"]
+        admin_users = [u["password"] for u in st.session_state.users if u.get("role") == "System Administrator" and u.get("status"] == "Active"]
         if admin_pass and admin_pass in admin_users:
             st.success("Admin Access Granted")
             st.session_state.is_admin = True
@@ -109,7 +250,7 @@ with st.sidebar:
                 
     elif nav_mode == "Auditor Portal":
         audit_pass = st.text_input("Enter Auditor Password", type="password")
-        auditor_users = [u["password"] for u in st.session_state.users if "Auditor" in u.get("role", "") and u.get("status") == "Active"]
+        auditor_users = [u["password"] for u in st.session_state.users if "Auditor" in u.get("role", "") and u.get("status"] == "Active"]
         if audit_pass and audit_pass in auditor_users:
             st.success("Auditor Access Granted")
             st.session_state.is_auditor = True
@@ -155,7 +296,7 @@ if nav_mode == "Admin Portal":
             if search_query:
                 filtered_subs = [s for s in filtered_subs if search_query.lower() in s.get("Name","").lower() or search_query in s.get("Employee No","") or search_query.lower() in s.get("Department","").lower()]
             if status_filter != "All":
-                filtered_subs = [s for s in filtered_subs if s.get("Status") == status_filter]
+                filtered_subs = [s for s in filtered_subs if s.get("Status"] == status_filter]
             
             if total_subs == 0:
                 st.info("No declarations submitted yet.")
