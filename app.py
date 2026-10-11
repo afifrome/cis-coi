@@ -17,7 +17,7 @@ st.set_page_config(
 @st.cache_resource
 def init_connection():
     return pg8000.dbapi.connect(
-        host="db.wswwovvogioefktgwazk.supabase.co",
+        host="43.201.127.185",
         database="postgres",
         user="postgres",
         password="sabahcement84476",
