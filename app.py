@@ -239,7 +239,7 @@ with st.sidebar:
     
     if nav_mode == "Admin Portal":
         admin_pass = st.text_input("Enter Admin Password", type="password")
-        admin_users = [u["password"] for u in st.session_state.users if u.get("role") == "System Administrator" and u.get("status"] == "Active"]
+        admin_users = [u["password"] for u in st.session_state.users if u.get("role") == "System Administrator" and u.get("status") == "Active"]
         if admin_pass and admin_pass in admin_users:
             st.success("Admin Access Granted")
             st.session_state.is_admin = True
