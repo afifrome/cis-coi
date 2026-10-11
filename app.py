@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 import base64
 import os
-import psycopg2
+import pg8000.dbapi
 
 # Page configuration
 st.set_page_config(
@@ -13,14 +13,19 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- SUPABASE DATABASE CONNECTION ---
+# --- PURE-PYTHON SUPABASE CONNECTION (Bypasses Python 3.14 C-binary crash) ---
 @st.cache_resource
 def init_connection():
-    db_url = st.secrets["postgres"]["url"]
-    return psycopg2.connect(db_url)
+    return pg8000.dbapi.connect(
+        host="db.wswwovvogioefktgwazk.supabase.co",
+        database="postgres",
+        user="postgres",
+        password="sabahcement84476",
+        port=5432,
+        ssl_context=True
+    )
 
 conn = init_connection()
-
 def init_db_tables():
     with conn.cursor() as cur:
         # 1. Submissions table
