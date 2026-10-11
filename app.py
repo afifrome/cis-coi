@@ -13,26 +13,11 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- SUPABASE DATABASE CONNECTION (Explicit Parameters for Stability) ---
+# --- SUPABASE DATABASE CONNECTION ---
 @st.cache_resource
 def init_connection():
-    try:
-        # Try using explicit keyword arguments first to prevent DSN/pooler parsing errors
-        return psycopg2.connect(
-            host="aws-0-ap-northeast-2.pooler.supabase.com",
-            port=5432,
-            dbname="postgres",
-            user="postgres.wswwovvugioefktgwazk",
-            password="sabahcement84476",
-            sslmode="require"
-        )
-    except Exception:
-        # Fallback to Streamlit Secrets URL if defined
-        db_url = st.secrets.get("postgres", {}).get(
-            "url", 
-            "postgresql://postgres.wswwovvugioefktgwazk:sabahcement84476@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
-        )
-        return psycopg2.connect(db_url)
+    db_url = st.secrets["postgres"]["url"]
+    return psycopg2.connect(db_url)
 
 conn = init_connection()
 
