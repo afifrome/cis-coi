@@ -250,7 +250,7 @@ with st.sidebar:
                 
     elif nav_mode == "Auditor Portal":
         audit_pass = st.text_input("Enter Auditor Password", type="password")
-        auditor_users = [u["password"] for u in st.session_state.users if "Auditor" in u.get("role", "") and u.get("status"] == "Active"]
+        auditor_users = [u["password"] for u in st.session_state.users if "Auditor" in u.get("role", "") and u.get("status") == "Active"]
         if audit_pass and audit_pass in auditor_users:
             st.success("Auditor Access Granted")
             st.session_state.is_auditor = True
