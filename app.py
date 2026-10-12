@@ -30,13 +30,7 @@ st.set_page_config(
 DB_FILE = "cis_tender_database.json"
 
 def load_data():
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        except:
-            pass
-    return {
+    local_data = {
         "submissions": [],
         "active_tenders": [
             "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
@@ -52,6 +46,31 @@ def load_data():
             {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
         ]
     }
+
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                saved = json.load(f)
+                if "submissions" in saved:
+                    local_data["submissions"] = saved["submissions"]
+                if "site_config" in saved:
+                    local_data["site_config"] = saved["site_config"]
+                if "users" in saved:
+                    local_data["users"] = saved["users"]
+        except:
+            pass
+
+    # Fetch active tenders from Supabase if available
+    if supabase:
+        try:
+            res = supabase.table("app2_active_tenders").select("tender_info").execute()
+            if res.data and len(res.data) > 0:
+                cloud_tenders = [row["tender_info"] for row in res.data]
+                local_data["active_tenders"] = cloud_tenders
+        except Exception:
+            pass
+
+    return local_data
 
 def save_data(data):
     with open(DB_FILE, "w") as f:
