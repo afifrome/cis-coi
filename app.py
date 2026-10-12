@@ -15,8 +15,8 @@ st.set_page_config(
 )
 
 # --- SUPABASE CLIENT CONNECTION ---
-SUPABASE_URL = "https://wswwovvugioefktgwazk.supabase.co"
-SUPABASE_KEY = st.secrets.get("supabase", {}).get("key", "YOUR_SUPABASE_ANON_KEY")
+SUPABASE_URL = "https://wswwovvogioefktgwazk.supabase.co"
+SUPABASE_KEY = st.secrets["supabase"]["key"]
 
 @st.cache_resource
 def init_supabase() -> Client:
