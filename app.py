@@ -1,6 +1,3 @@
-Here is the complete, fully updated `app.py` refactored to use the official `supabase` client library. This completely eliminates PostgreSQL driver crashes, pooler socket drops, and SSL handshake errors by communicating securely over standard HTTPS API endpoints.
-
-```python
 import streamlit as st
 from datetime import datetime
 import pandas as pd
