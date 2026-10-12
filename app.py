@@ -16,13 +16,8 @@ st.set_page_config(
 # --- PURE-PYTHON SUPABASE CONNECTION (Bypasses Python 3.14 C-binary crash) ---
 @st.cache_resource
 def init_connection():
-    return pg8000.dbapi.connect(
-        host="43.201.127.185",
-        database="postgres",
-        user="postgres",
-        password="sabahcement84476",
-        port=5432,
-        ssl_context=True
+    return psycopg2.connect(
+        "postgresql://postgres.wswwovvugioefktgwazk:sabahcement84476@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
     )
 
 conn = init_connection()
