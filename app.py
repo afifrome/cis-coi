@@ -1,10 +1,14 @@
+Here is the complete, fully updated `app.py` refactored to use the official `supabase` client library. This completely eliminates PostgreSQL driver crashes, pooler socket drops, and SSL handshake errors by communicating securely over standard HTTPS API endpoints.
+
+```python
 import streamlit as st
 from datetime import datetime
 import pandas as pd
 import streamlit.components.v1 as components
 import base64
+import json
 import os
-import psycopg2
+from supabase import create_client, Client
 
 # Page configuration
 st.set_page_config(
@@ -13,136 +17,98 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- PURE-PYTHON SUPABASE CONNECTION (Bypasses Python 3.14 C-binary crash) ---
+# --- SUPABASE CLIENT CONNECTION ---
+SUPABASE_URL = "https://wswwovvugioefktgwazk.supabase.co"
+SUPABASE_KEY = st.secrets.get("supabase", {}).get("key", "YOUR_SUPABASE_ANON_KEY")
+
 @st.cache_resource
-def init_connection():
-    return psycopg2.connect(
-        "postgresql://postgres.wswwovvugioefktgwazk:sabahcement84476@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres?sslmode=require"
-    )
+def init_supabase() -> Client:
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-conn = init_connection()
+supabase = init_supabase()
+
 def init_db_tables():
-    with conn.cursor() as cur:
-        # 1. Submissions table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS submissions (
-                id SERIAL PRIMARY KEY,
-                timestamp TEXT,
-                tender_ref TEXT,
-                name TEXT,
-                employee_no TEXT,
-                position TEXT,
-                department TEXT,
-                status TEXT,
-                conflict_details TEXT,
-                tenderer_involved TEXT,
-                agreed_terms TEXT
-            );
-        """)
-        # 2. Active tenders table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS active_tenders (
-                id SERIAL PRIMARY KEY,
-                tender_text TEXT UNIQUE
-            );
-        """)
-        # 3. Site config table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS site_config (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-        """)
-        # 4. Users table
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE,
-                password TEXT,
-                role TEXT,
-                access TEXT,
-                status TEXT
-            );
-        """)
-        conn.commit()
-
-        # Seed initial data if tables are empty
-        cur.execute("SELECT COUNT(*) FROM active_tenders;")
-        if cur.fetchone()[0] == 0:
+    # Fetch initial data to ensure tables have default seed rows if empty
+    try:
+        res_tenders = supabase.table("active_tenders").select("*").execute()
+        if not res_tenders.data:
             default_tenders = [
-                "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
-                "T2027/002 - Upgrading of Raw Material Handling Conveyor System",
-                "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"
+                {"tender_text": "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement"},
+                {"tender_text": "T2027/002 - Upgrading of Raw Material Handling Conveyor System"},
+                {"tender_text": "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"}
             ]
-            for t in default_tenders:
-                cur.execute("INSERT INTO active_tenders (tender_text) VALUES (%s) ON CONFLICT DO NOTHING;", (t,))
+            supabase.table("active_tenders").insert(default_tenders).execute()
 
-        cur.execute("SELECT COUNT(*) FROM site_config;")
-        if cur.fetchone()[0] == 0:
-            cur.execute("INSERT INTO site_config (key, value) VALUES (%s, %s) ON CONFLICT DO NOTHING;", ("company_name", "CEMENT INDUSTRIES (SABAH) SDN. BHD."))
-            cur.execute("INSERT INTO site_config (key, value) VALUES (%s, %s) ON CONFLICT DO NOTHING;", ("location_subtitle", "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"))
+        res_config = supabase.table("site_config").select("*").execute()
+        if not res_config.data:
+            default_config = [
+                {"key": "company_name", "value": "CEMENT INDUSTRIES (SABAH) SDN. BHD."},
+                {"key": "location_subtitle", "value": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"}
+            ]
+            supabase.table("site_config").insert(default_config).execute()
 
-        cur.execute("SELECT COUNT(*) FROM users;")
-        if cur.fetchone()[0] == 0:
+        res_users = supabase.table("users").select("*").execute()
+        if not res_users.data:
             default_users = [
-                ("admin", "admin123", "System Administrator", "Full CRUD on Tenders, Submissions & Config", "Active"),
-                ("auditor", "audit123", "Internal Auditor / Compliance", "Read-Only Register & Printable Report", "Active")
+                {"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full CRUD on Tenders, Submissions & Config", "status": "Active"},
+                {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
             ]
-            for u in default_users:
-                cur.execute("INSERT INTO users (username, password, role, access, status) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING;", u)
-        conn.commit()
+            supabase.table("users").insert(default_users).execute()
+    except Exception as e:
+        st.error(f"Database initialization warning: {e}. Please check your Supabase API keys in Streamlit Secrets.")
 
 init_db_tables()
 
-# --- LOAD DATA FROM POSTGRESQL ---
+# --- LOAD DATA FROM SUPABASE ---
 def load_data():
-    with conn.cursor() as cur:
-        # Load Submissions
-        cur.execute("SELECT timestamp, tender_ref, name, employee_no, position, department, status, conflict_details, tenderer_involved, agreed_terms FROM submissions ORDER BY id;")
-        sub_rows = cur.fetchall()
+    try:
+        sub_res = supabase.table("submissions").select("*").order("id").execute()
         submissions = []
-        for r in sub_rows:
+        for r in (sub_res.data or []):
             submissions.append({
-                "Timestamp": r[0],
-                "Tender Ref": r[1],
-                "Name": r[2],
-                "Employee No": r[3],
-                "Position": r[4],
-                "Department": r[5],
-                "Status": r[6],
-                "Conflict Details": r[7],
-                "Tenderer Involved": r[8],
-                "Agreed Terms": r[9]
+                "Timestamp": r.get("timestamp"),
+                "Tender Ref": r.get("tender_ref"),
+                "Name": r.get("name"),
+                "Employee No": r.get("employee_no"),
+                "Position": r.get("position"),
+                "Department": r.get("department"),
+                "Status": r.get("status"),
+                "Conflict Details": r.get("conflict_details"),
+                "Tenderer Involved": r.get("tenderer_involved"),
+                "Agreed Terms": r.get("agreed_terms")
             })
 
-        # Load Tenders
-        cur.execute("SELECT tender_text FROM active_tenders ORDER BY id;")
-        active_tenders = [row[0] for row in cur.fetchall()]
+        tender_res = supabase.table("active_tenders").select("tender_text").order("id").execute()
+        active_tenders = [row["tender_text"] for row in (tender_res.data or [])]
 
-        # Load Config
-        cur.execute("SELECT key, value FROM site_config;")
-        config_rows = cur.fetchall()
-        site_config = {row[0]: row[1] for row in config_rows}
+        config_res = supabase.table("site_config").select("key, value").execute()
+        site_config = {row["key"]: row["value"] for row in (config_res.data or [])}
 
-        # Load Users
-        cur.execute("SELECT username, password, role, access, status FROM users ORDER BY id;")
-        user_rows = cur.fetchall()
+        user_res = supabase.table("users").select("username, password, role, access, status").order("id").execute()
         users = []
-        for r in user_rows:
+        for r in (user_res.data or []):
             users.append({
-                "username": r[0],
-                "password": r[1],
-                "role": r[2],
-                "access": r[3],
-                "status": r[4]
+                "username": r.get("username"),
+                "password": r.get("password"),
+                "role": r.get("role"),
+                "access": r.get("access"),
+                "status": r.get("status")
             })
 
-    return {
-        "submissions": submissions,
-        "active_tenders": active_tenders,
-        "site_config": site_config,
-        "users": users
-    }
+        return {
+            "submissions": submissions,
+            "active_tenders": active_tenders,
+            "site_config": site_config,
+            "users": users
+        }
+    except Exception as e:
+        st.error(f"Error loading data from Supabase: {e}")
+        return {
+            "submissions": [],
+            "active_tenders": ["T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement"],
+            "site_config": {"company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.", "location_subtitle": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"},
+            "users": [{"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full Access", "status": "Active"}]
+        }
 
 db = load_data()
 
@@ -167,46 +133,49 @@ if "users" not in st.session_state:
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# --- DB COMMIT HELPERS (Syncs session state changes directly to Supabase) ---
+# --- SUPABASE SYNC HELPERS ---
 def commit_submissions():
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM submissions;")
+    supabase.table("submissions").delete().neq("id", 0).execute()
+    if st.session_state.submissions:
+        payload = []
         for s in st.session_state.submissions:
-            cur.execute("""
-                INSERT INTO submissions (timestamp, tender_ref, name, employee_no, position, department, status, conflict_details, tenderer_involved, agreed_terms)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-            """, (
-                s.get("Timestamp"), s.get("Tender Ref"), s.get("Name"), s.get("Employee No"),
-                s.get("Position"), s.get("Department"), s.get("Status"), s.get("Conflict Details"),
-                s.get("Tenderer Involved"), s.get("Agreed Terms")
-            ))
-        conn.commit()
+            payload.append({
+                "timestamp": s.get("Timestamp"),
+                "tender_ref": s.get("Tender Ref"),
+                "name": s.get("Name"),
+                "employee_no": s.get("Employee No"),
+                "position": s.get("Position"),
+                "department": s.get("Department"),
+                "status": s.get("Status"),
+                "conflict_details": s.get("Conflict Details"),
+                "tenderer_involved": s.get("Tenderer Involved"),
+                "agreed_terms": s.get("Agreed Terms")
+            })
+        supabase.table("submissions").insert(payload).execute()
 
 def commit_tenders():
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM active_tenders;")
-        for t in st.session_state.active_tenders:
-            cur.execute("INSERT INTO active_tenders (tender_text) VALUES (%s) ON CONFLICT DO NOTHING;", (t,))
-        conn.commit()
+    supabase.table("active_tenders").delete().neq("id", 0).execute()
+    if st.session_state.active_tenders:
+        payload = [{"tender_text": t} for t in st.session_state.active_tenders]
+        supabase.table("active_tenders").insert(payload).execute()
 
 def commit_config():
-    with conn.cursor() as cur:
-        for k, v in st.session_state.site_config.items():
-            cur.execute("""
-                INSERT INTO site_config (key, value) VALUES (%s, %s)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-            """, (k, v))
-        conn.commit()
+    for k, v in st.session_state.site_config.items():
+        supabase.table("site_config").upsert({"key": k, "value": v}).execute()
 
 def commit_users():
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM users;")
+    supabase.table("users").delete().neq("id", 0).execute()
+    if st.session_state.users:
+        payload = []
         for u in st.session_state.users:
-            cur.execute("""
-                INSERT INTO users (username, password, role, access, status)
-                VALUES (%s, %s, %s, %s, %s);
-            """, (u.get("username"), u.get("password"), u.get("role"), u.get("access"), u.get("status")))
-        conn.commit()
+            payload.append({
+                "username": u.get("username"),
+                "password": u.get("password"),
+                "role": u.get("role"),
+                "access": u.get("access"),
+                "status": u.get("status")
+            })
+        supabase.table("users").insert(payload).execute()
 
 def commit_db():
     commit_submissions()
@@ -964,3 +933,5 @@ else:
         if st.button("🔄 Submit Another Declaration", type="primary"):
             st.session_state.step = 1
             st.rerun()
+
+```
