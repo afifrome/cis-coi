@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 import base64
 import os
-import pg8000.dbapi
+import psycopg2
 
 # Page configuration
 st.set_page_config(
