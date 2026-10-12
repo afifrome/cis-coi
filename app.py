@@ -3,9 +3,22 @@ from datetime import datetime
 import pandas as pd
 import streamlit.components.v1 as components
 import base64
-import json
 import os
+import json
 from supabase import create_client, Client
+
+# --- SUPABASE CONFIGURATION ---
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
+    @st.cache_resource
+    def init_supabase() -> Client:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    supabase = init_supabase()
+except Exception:
+    supabase = None
 
 # Page configuration
 st.set_page_config(
@@ -14,98 +27,35 @@ st.set_page_config(
     layout="centered"
 )
 
-# --- SUPABASE CLIENT CONNECTION ---
-SUPABASE_URL = "https://wswwovvogioefktgwazk.supabase.co"
-SUPABASE_KEY = st.secrets["supabase"]["key"]
+DB_FILE = "cis_tender_database.json"
 
-@st.cache_resource
-def init_supabase() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-supabase = init_supabase()
-
-def init_db_tables():
-    # Fetch initial data to ensure tables have default seed rows if empty
-    try:
-        res_tenders = supabase.table("active_tenders").select("*").execute()
-        if not res_tenders.data:
-            default_tenders = [
-                {"tender_text": "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement"},
-                {"tender_text": "T2027/002 - Upgrading of Raw Material Handling Conveyor System"},
-                {"tender_text": "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"}
-            ]
-            supabase.table("active_tenders").insert(default_tenders).execute()
-
-        res_config = supabase.table("site_config").select("*").execute()
-        if not res_config.data:
-            default_config = [
-                {"key": "company_name", "value": "CEMENT INDUSTRIES (SABAH) SDN. BHD."},
-                {"key": "location_subtitle", "value": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"}
-            ]
-            supabase.table("site_config").insert(default_config).execute()
-
-        res_users = supabase.table("users").select("*").execute()
-        if not res_users.data:
-            default_users = [
-                {"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full CRUD on Tenders, Submissions & Config", "status": "Active"},
-                {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
-            ]
-            supabase.table("users").insert(default_users).execute()
-    except Exception as e:
-        st.error(f"Database initialization warning: {e}. Please check your Supabase API keys in Streamlit Secrets.")
-
-init_db_tables()
-
-# --- LOAD DATA FROM SUPABASE ---
 def load_data():
-    try:
-        sub_res = supabase.table("submissions").select("*").order("id").execute()
-        submissions = []
-        for r in (sub_res.data or []):
-            submissions.append({
-                "Timestamp": r.get("timestamp"),
-                "Tender Ref": r.get("tender_ref"),
-                "Name": r.get("name"),
-                "Employee No": r.get("employee_no"),
-                "Position": r.get("position"),
-                "Department": r.get("department"),
-                "Status": r.get("status"),
-                "Conflict Details": r.get("conflict_details"),
-                "Tenderer Involved": r.get("tenderer_involved"),
-                "Agreed Terms": r.get("agreed_terms")
-            })
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {
+        "submissions": [],
+        "active_tenders": [
+            "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
+            "T2027/002 - Upgrading of Raw Material Handling Conveyor System",
+            "T2027/003 - Provision of Scheduled Waste Management & Disposal Services"
+        ],
+        "site_config": {
+            "company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.",
+            "location_subtitle": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"
+        },
+        "users": [
+            {"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full CRUD on Tenders, Submissions & Config", "status": "Active"},
+            {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
+        ]
+    }
 
-        tender_res = supabase.table("active_tenders").select("tender_text").order("id").execute()
-        active_tenders = [row["tender_text"] for row in (tender_res.data or [])]
-
-        config_res = supabase.table("site_config").select("key, value").execute()
-        site_config = {row["key"]: row["value"] for row in (config_res.data or [])}
-
-        user_res = supabase.table("users").select("username, password, role, access, status").order("id").execute()
-        users = []
-        for r in (user_res.data or []):
-            users.append({
-                "username": r.get("username"),
-                "password": r.get("password"),
-                "role": r.get("role"),
-                "access": r.get("access"),
-                "status": r.get("status")
-            })
-
-        return {
-            "submissions": submissions,
-            "active_tenders": active_tenders,
-            "site_config": site_config,
-            "users": users
-        }
-    except Exception as e:
-        st.error(f"Error loading data from Supabase: {e}")
-        return {
-            "submissions": [],
-            "active_tenders": ["T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement"],
-            "site_config": {"company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.", "location_subtitle": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"},
-            "users": [{"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full Access", "status": "Active"}]
-        }
+def save_data(data):
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
 db = load_data()
 
@@ -130,55 +80,13 @@ if "users" not in st.session_state:
 if "step" not in st.session_state:
     st.session_state.step = 1
 
-# --- SUPABASE SYNC HELPERS ---
-def commit_submissions():
-    supabase.table("submissions").delete().neq("id", 0).execute()
-    if st.session_state.submissions:
-        payload = []
-        for s in st.session_state.submissions:
-            payload.append({
-                "timestamp": s.get("Timestamp"),
-                "tender_ref": s.get("Tender Ref"),
-                "name": s.get("Name"),
-                "employee_no": s.get("Employee No"),
-                "position": s.get("Position"),
-                "department": s.get("Department"),
-                "status": s.get("Status"),
-                "conflict_details": s.get("Conflict Details"),
-                "tenderer_involved": s.get("Tenderer Involved"),
-                "agreed_terms": s.get("Agreed Terms")
-            })
-        supabase.table("submissions").insert(payload).execute()
-
-def commit_tenders():
-    supabase.table("active_tenders").delete().neq("id", 0).execute()
-    if st.session_state.active_tenders:
-        payload = [{"tender_text": t} for t in st.session_state.active_tenders]
-        supabase.table("active_tenders").insert(payload).execute()
-
-def commit_config():
-    for k, v in st.session_state.site_config.items():
-        supabase.table("site_config").upsert({"key": k, "value": v}).execute()
-
-def commit_users():
-    supabase.table("users").delete().neq("id", 0).execute()
-    if st.session_state.users:
-        payload = []
-        for u in st.session_state.users:
-            payload.append({
-                "username": u.get("username"),
-                "password": u.get("password"),
-                "role": u.get("role"),
-                "access": u.get("access"),
-                "status": u.get("status")
-            })
-        supabase.table("users").insert(payload).execute()
-
 def commit_db():
-    commit_submissions()
-    commit_tenders()
-    commit_config()
-    commit_users()
+    save_data({
+        "submissions": st.session_state.submissions,
+        "active_tenders": st.session_state.active_tenders,
+        "site_config": st.session_state.site_config,
+        "users": st.session_state.users
+    })
 
 def next_step():
     st.session_state.step += 1
@@ -322,13 +230,16 @@ if nav_mode == "Admin Portal":
 
         with admin_tab2:
             st.markdown("### 🏗️ Advanced Tender Event Management")
-            col_ta1, col_ta2 = st.columns([2, 2])
-            with col_ta1:
-                if st.button("⚠️ Clear All Tenders", type="secondary"):
-                    st.session_state.active_tenders = []
-                    commit_db()
-                    st.success("All tenders have been cleared.")
-                    st.rerun()
+            if st.button("⚠️ Clear All Tenders", type="secondary"):
+                st.session_state.active_tenders = []
+                commit_db()
+                if supabase:
+                    try:
+                        supabase.table("app2_active_tenders").delete().neq("id", 0).execute()
+                    except:
+                        pass
+                st.success("All tenders have been cleared.")
+                st.rerun()
             
             st.markdown("---")
             if len(st.session_state.active_tenders) == 0:
@@ -342,6 +253,11 @@ if nav_mode == "Admin Portal":
                         if st.button("🗑️ Remove", key=f"del_tender_{idx}"):
                             st.session_state.active_tenders.pop(idx)
                             commit_db()
+                            if supabase:
+                                try:
+                                    supabase.table("app2_active_tenders").delete().eq("tender_info", tender).execute()
+                                except:
+                                    pass
                             st.rerun()
             
             st.markdown("---")
@@ -355,6 +271,13 @@ if nav_mode == "Admin Portal":
                     if full_new_tender not in st.session_state.active_tenders:
                         st.session_state.active_tenders.append(full_new_tender)
                         commit_db()
+                        
+                        if supabase:
+                            try:
+                                supabase.table("app2_active_tenders").insert({"tender_info": full_new_tender}).execute()
+                            except Exception as sb_err:
+                                st.warning(f"Cloud sync warning: {sb_err}")
+
                         st.success(f"Added new tender: {full_new_tender}")
                         st.rerun()
                     else:
@@ -732,8 +655,9 @@ else:
                     st.error("You must agree to the terms and undertakings to submit this declaration.")
                 else:
                     tender_ref_code = st.session_state.selected_tender.split(" - ")[0]
+                    timestamp_val = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     submission_data = {
-                        "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "Timestamp": timestamp_val,
                         "Tender Ref": tender_ref_code,
                         "Name": st.session_state.name,
                         "Employee No": st.session_state.emp_no,
@@ -747,6 +671,23 @@ else:
                     st.session_state.submissions.append(submission_data)
                     commit_db()
                     
+                    # Sync to Supabase `conflict_submissions` table
+                    if supabase:
+                        try:
+                            payload = {
+                                "tender_ref": str(tender_ref_code),
+                                "name": str(st.session_state.name),
+                                "employee_no": str(st.session_state.emp_no),
+                                "position": str(st.session_state.position),
+                                "department": str(st.session_state.department),
+                                "status": str(conflict_choice),
+                                "conflict_details": f"Tenderer: {tenderer_involved} | Details: {conflict_details}" if (conflict_details or tenderer_involved) else "None",
+                                "timestamp": str(timestamp_val)
+                            }
+                            supabase.table("conflict_submissions").insert(payload).execute()
+                        except Exception as e:
+                            st.warning(f"Cloud sync warning: {e}")
+                    
                     st.session_state.conflict_choice = conflict_choice
                     st.session_state.conflict_details = conflict_details
                     st.session_state.tenderer_involved = tenderer_involved
@@ -757,7 +698,7 @@ else:
         status_badge_html = '<span style="background-color: #065f46; color: #d1fae5; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; border: 1px solid #10b981;">✅ No Conflict of Interest</span>' if st.session_state.get('conflict_choice') == "No Conflict of Interest" else '<span style="background-color: #92400e; color: #fef3c7; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; border: 1px solid #f59e0b;">⚠️ Conflict of Interest Exists</span>'
         timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        st.success("🎉 Declaration submitted successfully! Your record has been securely logged into the CIS compliance database.")
+        st.success("🎉 Declaration submitted successfully! Your record has been securely logged into the compliance database and synced to the cloud.")
         
         conflict_extra_section = f"""
         <div class="conflict-details-box">
