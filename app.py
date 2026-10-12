@@ -930,5 +930,3 @@ else:
         if st.button("🔄 Submit Another Declaration", type="primary"):
             st.session_state.step = 1
             st.rerun()
-
-```
