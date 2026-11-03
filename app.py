@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit.components.v1 as components
 import base64
 import os
+import json
 from supabase import create_client, Client
 
 # --- TIMEZONE CONFIGURATION ---
