@@ -58,8 +58,8 @@ def fetch_cloud_data():
     }
     
     try:
-        # 1. Fetch Submissions
-        res_sub = supabase.table("app2_submissions").select("*").execute()
+        # 1. Fetch Submissions from the new table
+        res_sub = supabase.table("app3_submissions").select("*").execute()
         if res_sub.data:
             data["submissions"] = [{
                 "Timestamp": row.get("timestamp"),
@@ -737,7 +737,7 @@ else:
                     }
                     st.session_state.submissions.append(submission_data)
                     
-                    # Insert directly into Supabase
+                    # Insert directly into the new Supabase table
                     try:
                         payload = {
                             "tender_ref": str(tender_ref_code),
@@ -751,7 +751,7 @@ else:
                             "timestamp": str(timestamp_val),
                             "agreed_terms": "Yes"
                         }
-                        supabase.table("app2_submissions").insert(payload).execute()
+                        supabase.table("app3_submissions").insert(payload).execute()
                     except Exception as e:
                         st.error(f"Cloud submission error: {e}")
                     
