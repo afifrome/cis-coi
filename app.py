@@ -1,11 +1,17 @@
 import streamlit as st
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit.components.v1 as components
 import base64
 import os
-import json
 from supabase import create_client, Client
+
+# --- TIMEZONE CONFIGURATION ---
+LOCAL_TZ = ZoneInfo("Asia/Kuching")
+
+def get_local_now() -> datetime:
+    return datetime.now(LOCAL_TZ)
 
 # --- SUPABASE CONFIGURATION ---
 try:
@@ -27,10 +33,13 @@ st.set_page_config(
     layout="centered"
 )
 
-DB_FILE = "cis_tender_database.json"
+if not supabase:
+    st.error("🚨 Supabase connection credentials are missing or invalid. Please check your Streamlit secrets (`SUPABASE_URL` and `SUPABASE_KEY`).")
+    st.stop()
 
-def load_data():
-    local_data = {
+# --- CLOUD DATA FETCHING FUNCTIONS ---
+def fetch_cloud_data():
+    data = {
         "submissions": [],
         "active_tenders": [
             "T2027/001 - Supply and Delivery of Bulk Ordinary Portland Cement",
@@ -46,37 +55,54 @@ def load_data():
             {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
         ]
     }
+    
+    try:
+        # 1. Fetch Submissions
+        res_sub = supabase.table("app2_submissions").select("*").execute()
+        if res_sub.data:
+            data["submissions"] = [{
+                "Timestamp": row.get("timestamp"),
+                "Tender Ref": row.get("tender_ref"),
+                "Name": row.get("name"),
+                "Employee No": row.get("employee_no"),
+                "Position": row.get("position"),
+                "Department": row.get("department"),
+                "Status": row.get("status"),
+                "Conflict Details": row.get("conflict_details"),
+                "Tenderer Involved": row.get("tenderer_involved", "None"),
+                "Agreed Terms": row.get("agreed_terms", "Yes")
+            } for row in res_sub.data]
+        
+        # 2. Fetch Active Tenders
+        res_ten = supabase.table("app2_active_tenders").select("tender_info").execute()
+        if res_ten.data:
+            data["active_tenders"] = [row["tender_info"] for row in res_ten.data]
+            
+        # 3. Fetch Site Config
+        res_cfg = supabase.table("app2_site_config").select("*").limit(1).execute()
+        if res_cfg.data and len(res_cfg.data) > 0:
+            cfg = res_cfg.data[0]
+            data["site_config"] = {
+                "company_name": cfg.get("company_name", data["site_config"]["company_name"]),
+                "location_subtitle": cfg.get("location_subtitle", data["site_config"]["location_subtitle"])
+            }
+            
+        # 4. Fetch Users
+        res_usr = supabase.table("app2_users").select("*").execute()
+        if res_usr.data:
+            data["users"] = [{
+                "username": u.get("username"),
+                "password": u.get("password"),
+                "role": u.get("role"),
+                "access": u.get("access"),
+                "status": u.get("status")
+            } for u in res_usr.data]
+    except Exception as e:
+        st.warning(f"Cloud data sync notice: {e}")
+        
+    return data
 
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                saved = json.load(f)
-                if "submissions" in saved:
-                    local_data["submissions"] = saved["submissions"]
-                if "site_config" in saved:
-                    local_data["site_config"] = saved["site_config"]
-                if "users" in saved:
-                    local_data["users"] = saved["users"]
-        except:
-            pass
-
-    # Fetch active tenders from Supabase if available
-    if supabase:
-        try:
-            res = supabase.table("app2_active_tenders").select("tender_info").execute()
-            if res.data and len(res.data) > 0:
-                cloud_tenders = [row["tender_info"] for row in res.data]
-                local_data["active_tenders"] = cloud_tenders
-        except Exception:
-            pass
-
-    return local_data
-
-def save_data(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-db = load_data()
+db = fetch_cloud_data()
 
 if "submissions" not in st.session_state:
     st.session_state.submissions = db["submissions"]
@@ -85,27 +111,13 @@ if "active_tenders" not in st.session_state:
     st.session_state.active_tenders = db["active_tenders"]
 
 if "site_config" not in st.session_state:
-    st.session_state.site_config = db.get("site_config", {
-        "company_name": "CEMENT INDUSTRIES (SABAH) SDN. BHD.",
-        "location_subtitle": "Sepanggar Industrial Estate • Opening Tender Committee Declaration Form"
-    })
+    st.session_state.site_config = db["site_config"]
 
 if "users" not in st.session_state:
-    st.session_state.users = db.get("users", [
-        {"username": "admin", "password": "admin123", "role": "System Administrator", "access": "Full CRUD on Tenders, Submissions & Config", "status": "Active"},
-        {"username": "auditor", "password": "audit123", "role": "Internal Auditor / Compliance", "access": "Read-Only Register & Printable Report", "status": "Active"}
-    ])
+    st.session_state.users = db["users"]
 
 if "step" not in st.session_state:
     st.session_state.step = 1
-
-def commit_db():
-    save_data({
-        "submissions": st.session_state.submissions,
-        "active_tenders": st.session_state.active_tenders,
-        "site_config": st.session_state.site_config,
-        "users": st.session_state.users
-    })
 
 def next_step():
     st.session_state.step += 1
@@ -172,7 +184,7 @@ if nav_mode == "Admin Portal":
             "🏗️ Tender Management", 
             "⚙️ Site Content & Config",
             "👥 User & Credential Manager",
-            "💾 Backup & System"
+            "💾 Cloud Backup & Sync"
         ])
         
         with admin_tab1:
@@ -188,14 +200,14 @@ if nav_mode == "Admin Portal":
             if search_query:
                 filtered_subs = [s for s in filtered_subs if search_query.lower() in s.get("Name","").lower() or search_query in s.get("Employee No","") or search_query.lower() in s.get("Department","").lower()]
             if status_filter != "All":
-                filtered_subs = [s for s in filtered_subs if s.get("Status") == status_filter]
+                filtered_subs = [s for s in filtered_subs if s.get("Status"] == status_filter]
             
             if total_subs == 0:
                 st.info("No declarations submitted yet.")
             elif len(filtered_subs) == 0:
                 st.info("No matching submissions found with the applied filters.")
             else:
-                sub_options = {f"[{s['Timestamp']}] {s['Name']} (Emp: {s['Employee No']}) - {s['Tender Ref']}": st.session_state.submissions.index(s) for s in filtered_subs}
+                sub_options = {f"[{s['Timestamp']}] {s['Name']} (Emp: {s['Employee No']}) - {s['Tender Ref']}": idx for idx, s in enumerate(st.session_state.submissions) if s in filtered_subs}
                 selected_sub_label = st.selectbox("Select Submission to Manage", list(sub_options.keys()))
                 selected_idx = sub_options[selected_sub_label]
                 target_sub = st.session_state.submissions[selected_idx]
@@ -218,21 +230,37 @@ if nav_mode == "Admin Portal":
                     col_btn_update, col_btn_delete = st.columns([2, 1])
                     with col_btn_update:
                         if st.button("💾 Save Changes to Record", type="primary"):
+                            updated_tender_ref = edit_tender.split(" - ")[0]
                             st.session_state.submissions[selected_idx]["Name"] = edit_name
                             st.session_state.submissions[selected_idx]["Employee No"] = edit_emp
                             st.session_state.submissions[selected_idx]["Position"] = edit_pos
                             st.session_state.submissions[selected_idx]["Department"] = edit_dept
                             st.session_state.submissions[selected_idx]["Status"] = edit_status
-                            st.session_state.submissions[selected_idx]["Tender Ref"] = edit_tender.split(" - ")[0]
+                            st.session_state.submissions[selected_idx]["Tender Ref"] = updated_tender_ref
                             st.session_state.submissions[selected_idx]["Conflict Details"] = edit_details
-                            commit_db()
-                            st.success("Submission updated successfully!")
+                            
+                            try:
+                                supabase.table("app2_submissions").update({
+                                    "name": edit_name,
+                                    "employee_no": edit_emp,
+                                    "position": edit_pos,
+                                    "department": edit_dept,
+                                    "status": edit_status,
+                                    "tender_ref": updated_tender_ref,
+                                    "conflict_details": edit_details
+                                }).eq("timestamp", target_sub["Timestamp"]).execute()
+                                st.success("Submission updated successfully in Supabase!")
+                            except Exception as e:
+                                st.error(f"Error updating Supabase: {e}")
                             st.rerun()
                     with col_btn_delete:
                         if st.button("🗑️ Delete Submission", type="secondary"):
-                            st.session_state.submissions.pop(selected_idx)
-                            commit_db()
-                            st.success("Submission deleted successfully!")
+                            removed_sub = st.session_state.submissions.pop(selected_idx)
+                            try:
+                                supabase.table("app2_submissions").delete().eq("timestamp", removed_sub["Timestamp"]).execute()
+                                st.success("Submission deleted from Supabase successfully!")
+                            except Exception as e:
+                                st.error(f"Error deleting from Supabase: {e}")
                             st.rerun()
                 
                 st.markdown("---")
@@ -243,7 +271,7 @@ if nav_mode == "Admin Portal":
                 st.download_button(
                     label="📥 Export Verified Submissions to CSV",
                     data=csv_data,
-                    file_name=f"CIS_Admin_Verified_Declarations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    file_name=f"CIS_Admin_Verified_Declarations_{get_local_now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
                 )
 
@@ -251,12 +279,10 @@ if nav_mode == "Admin Portal":
             st.markdown("### 🏗️ Advanced Tender Event Management")
             if st.button("⚠️ Clear All Tenders", type="secondary"):
                 st.session_state.active_tenders = []
-                commit_db()
-                if supabase:
-                    try:
-                        supabase.table("app2_active_tenders").delete().neq("id", 0).execute()
-                    except:
-                        pass
+                try:
+                    supabase.table("app2_active_tenders").delete().neq("id", 0).execute()
+                except:
+                    pass
                 st.success("All tenders have been cleared.")
                 st.rerun()
             
@@ -271,12 +297,10 @@ if nav_mode == "Admin Portal":
                     with col_t_del:
                         if st.button("🗑️ Remove", key=f"del_tender_{idx}"):
                             st.session_state.active_tenders.pop(idx)
-                            commit_db()
-                            if supabase:
-                                try:
-                                    supabase.table("app2_active_tenders").delete().eq("tender_info", tender).execute()
-                                except:
-                                    pass
+                            try:
+                                supabase.table("app2_active_tenders").delete().eq("tender_info", tender).execute()
+                            except Exception as e:
+                                st.error(f"Error removing tender: {e}")
                             st.rerun()
             
             st.markdown("---")
@@ -289,15 +313,11 @@ if nav_mode == "Admin Portal":
                     full_new_tender = f"{new_tender_code} - {new_tender_desc}"
                     if full_new_tender not in st.session_state.active_tenders:
                         st.session_state.active_tenders.append(full_new_tender)
-                        commit_db()
-                        
-                        if supabase:
-                            try:
-                                supabase.table("app2_active_tenders").insert({"tender_info": full_new_tender}).execute()
-                            except Exception as sb_err:
-                                st.warning(f"Cloud sync warning: {sb_err}")
-
-                        st.success(f"Added new tender: {full_new_tender}")
+                        try:
+                            supabase.table("app2_active_tenders").insert({"tender_info": full_new_tender}).execute()
+                            st.success(f"Added new tender: {full_new_tender}")
+                        except Exception as sb_err:
+                            st.error(f"Cloud sync error: {sb_err}")
                         st.rerun()
                     else:
                         st.warning("Tender already exists.")
@@ -312,8 +332,16 @@ if nav_mode == "Admin Portal":
             if st.button("💾 Save Site Configuration"):
                 st.session_state.site_config["company_name"] = new_company_name
                 st.session_state.site_config["location_subtitle"] = new_subtitle
-                commit_db()
-                st.success("Site configuration updated successfully!")
+                try:
+                    # Update or insert config row in Supabase
+                    supabase.table("app2_site_config").upsert({
+                        "id": 1,
+                        "company_name": new_company_name,
+                        "location_subtitle": new_subtitle
+                    }).execute()
+                    st.success("Site configuration updated in Supabase successfully!")
+                except Exception as e:
+                    st.error(f"Error updating configuration: {e}")
                 st.rerun()
 
         with admin_tab4:
@@ -345,17 +373,29 @@ if nav_mode == "Admin Portal":
                             st.session_state.users[selected_u_idx]["role"] = edit_role
                             st.session_state.users[selected_u_idx]["status"] = edit_status
                             st.session_state.users[selected_u_idx]["access"] = edit_access
-                            commit_db()
-                            st.success("User account updated successfully!")
+                            try:
+                                supabase.table("app2_users").update({
+                                    "username": edit_username,
+                                    "password": edit_password,
+                                    "role": edit_role,
+                                    "status": edit_status,
+                                    "access": edit_access
+                                }).eq("username", target_user["username"]).execute()
+                                st.success("User account updated in Supabase successfully!")
+                            except Exception as e:
+                                st.error(f"Error updating user: {e}")
                             st.rerun()
                     with col_uu_btn2:
                         if st.button("🗑️ Delete User", type="secondary"):
                             if len(st.session_state.users) <= 1:
                                 st.error("Cannot delete the last remaining user account.")
                             else:
-                                st.session_state.users.pop(selected_u_idx)
-                                commit_db()
-                                st.success("User account removed successfully!")
+                                removed_user = st.session_state.users.pop(selected_u_idx)
+                                try:
+                                    supabase.table("app2_users").delete().eq("username", removed_user["username"]).execute()
+                                    st.success("User account removed from Supabase successfully!")
+                                except Exception as e:
+                                    st.error(f"Error deleting user: {e}")
                                 st.rerun()
             
             st.markdown("---")
@@ -373,15 +413,19 @@ if nav_mode == "Admin Portal":
                     if any(u["username"] == new_username for u in st.session_state.users):
                         st.error("Username already exists.")
                     else:
-                        st.session_state.users.append({
+                        new_user_obj = {
                             "username": new_username,
                             "password": new_password,
                             "role": new_role,
                             "access": new_access,
                             "status": "Active"
-                        })
-                        commit_db()
-                        st.success(f"User account '{new_username}' created successfully!")
+                        }
+                        st.session_state.users.append(new_user_obj)
+                        try:
+                            supabase.table("app2_users").insert(new_user_obj).execute()
+                            st.success(f"User account '{new_username}' created in Supabase successfully!")
+                        except Exception as e:
+                            st.error(f"Error creating user: {e}")
                         st.rerun()
                 else:
                     st.error("Please provide both username and password.")
@@ -391,7 +435,7 @@ if nav_mode == "Admin Portal":
             st.dataframe(pd.DataFrame(st.session_state.users), use_container_width=True)
 
         with admin_tab5:
-            st.markdown("### 💾 Database Backup & System Restore")
+            st.markdown("### 💾 Cloud Database Backup")
             db_json_str = json.dumps({
                 "submissions": st.session_state.submissions,
                 "active_tenders": st.session_state.active_tenders,
@@ -400,9 +444,9 @@ if nav_mode == "Admin Portal":
             }, indent=4)
             
             st.download_button(
-                label="📥 Download Full System Database (.json)",
+                label="📥 Download Cloud System Database (.json)",
                 data=db_json_str,
-                file_name=f"cis_tender_db_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                file_name=f"cis_tender_cloud_backup_{get_local_now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
     else:
@@ -425,7 +469,7 @@ elif nav_mode == "Auditor Portal":
             st.download_button(
                 label="📥 Export Detailed Audit Register to CSV",
                 data=csv_data,
-                file_name=f"CIS_Detailed_Audit_Register_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                file_name=f"CIS_Detailed_Audit_Register_{get_local_now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
             )
             
@@ -435,6 +479,7 @@ elif nav_mode == "Auditor Portal":
             total_count = len(df)
             conflicts_count = len(df[df['Status'] == 'Conflict of Interest Exists'])
             clean_count = total_count - conflicts_count
+            local_now = get_local_now()
 
             report_html = f"""
             <html>
@@ -484,7 +529,7 @@ elif nav_mode == "Auditor Portal":
                             <td style="border: none; padding: 10px 0; width: 65%; vertical-align: middle;">
                                 <div class="company-title">{st.session_state.site_config.get('company_name')}</div>
                                 <div class="report-subtitle">Official Detailed Conflict of Interest Audit Register</div>
-                                <div class="meta-info">Doc Ref: CIS/OTC/COI-DET/{datetime.now().strftime('%Y/%m')} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+                                <div class="meta-info">Doc Ref: CIS/OTC/COI-DET/{local_now.strftime('%Y/%m')} | Generated: {local_now.strftime('%Y-%m-%d %H:%M:%S')}</div>
                             </td>
                         </tr>
                     </table>
@@ -674,7 +719,9 @@ else:
                     st.error("You must agree to the terms and undertakings to submit this declaration.")
                 else:
                     tender_ref_code = st.session_state.selected_tender.split(" - ")[0]
-                    timestamp_val = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    local_now = get_local_now()
+                    timestamp_val = local_now.strftime('%Y-%m-%d %H:%M:%S')
+                    
                     submission_data = {
                         "Timestamp": timestamp_val,
                         "Tender Ref": tender_ref_code,
@@ -688,24 +735,24 @@ else:
                         "Agreed Terms": "Yes"
                     }
                     st.session_state.submissions.append(submission_data)
-                    commit_db()
                     
-                    # Sync to Supabase `conflict_submissions` table
-                    if supabase:
-                        try:
-                            payload = {
-                                "tender_ref": str(tender_ref_code),
-                                "name": str(st.session_state.name),
-                                "employee_no": str(st.session_state.emp_no),
-                                "position": str(st.session_state.position),
-                                "department": str(st.session_state.department),
-                                "status": str(conflict_choice),
-                                "conflict_details": f"Tenderer: {tenderer_involved} | Details: {conflict_details}" if (conflict_details or tenderer_involved) else "None",
-                                "timestamp": str(timestamp_val)
-                            }
-                            supabase.table("conflict_submissions").insert(payload).execute()
-                        except Exception as e:
-                            st.warning(f"Cloud sync warning: {e}")
+                    # Insert directly into Supabase
+                    try:
+                        payload = {
+                            "tender_ref": str(tender_ref_code),
+                            "name": str(st.session_state.name),
+                            "employee_no": str(st.session_state.emp_no),
+                            "position": str(st.session_state.position),
+                            "department": str(st.session_state.department),
+                            "status": str(conflict_choice),
+                            "conflict_details": conflict_details if conflict_details else "None",
+                            "tenderer_involved": tenderer_involved if tenderer_involved else "None",
+                            "timestamp": str(timestamp_val),
+                            "agreed_terms": "Yes"
+                        }
+                        supabase.table("app2_submissions").insert(payload).execute()
+                    except Exception as e:
+                        st.error(f"Cloud submission error: {e}")
                     
                     st.session_state.conflict_choice = conflict_choice
                     st.session_state.conflict_details = conflict_details
@@ -715,7 +762,10 @@ else:
 
     elif step_num == 3:
         status_badge_html = '<span style="background-color: #065f46; color: #d1fae5; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; border: 1px solid #10b981;">✅ No Conflict of Interest</span>' if st.session_state.get('conflict_choice') == "No Conflict of Interest" else '<span style="background-color: #92400e; color: #fef3c7; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; display: inline-block; border: 1px solid #f59e0b;">⚠️ Conflict of Interest Exists</span>'
-        timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        local_now = get_local_now()
+        timestamp_str = local_now.strftime('%Y-%m-%d %H:%M:%S')
+        ref_id_str = f"CIS-OTC-{local_now.strftime('%Y%m%d%H%M%S')}"
         
         st.success("🎉 Declaration submitted successfully! Your record has been securely logged into the compliance database and synced to the cloud.")
         
@@ -877,7 +927,7 @@ else:
                 {conflict_extra_section}
                 
                 <div class="footer-meta">
-                    Secure Timestamp: {timestamp_str} &bull; Ref: CIS-OTC-{datetime.now().strftime('%Y%m%d%H%M%S')}
+                    Secure Timestamp: {timestamp_str} • Ref: {ref_id_str}
                 </div>
             </div>
         </body>
